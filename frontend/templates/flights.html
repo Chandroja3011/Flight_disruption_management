@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Flights — FDMS</title>
+<link rel="stylesheet" href="/static/css/main.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sidebar-logo"><span class="logo-icon">✈</span><span class="logo-text">FDMS</span></div>
+  <ul class="nav-links">
+    <li><a href="/"><span class="icon">⬛</span>Dashboard</a></li>
+    <li><a href="/flights" class="active"><span class="icon">🛫</span>Flights</a></li>
+    <li><a href="/disruptions"><span class="icon">⚡</span>Disruptions</a></li>
+    <li><a href="/crew"><span class="icon">👤</span>Crew & Pilots</a></li>
+    <li><a href="/bookings"><span class="icon">🎫</span>Bookings</a></li>
+    <li><a href="/fare"><span class="icon">💹</span>Fare & Surge</a></li>
+    <li><a href="/radar"><span class="icon">📡</span>Live Radar</a></li>
+    <li><a href="/normalization"><span class="icon">🔣</span>Normalization</a></li>
+    <li><a href="/concurrency"><span class="icon">🔒</span>Concurrency</a></li>
+    <li><a href="/analytics"><span class="icon">📊</span>Analytics</a></li>
+  </ul>
+  <div class="sidebar-footer">Flight Disruption DB</div>
+</nav>
+
+<main class="content">
+  <header class="page-header">
+    <h1>🛫 Flight Management</h1>
+    <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">DDL · DML · JOIN · Constraints</span>
+  </header>
+
+  <!-- STATUS FILTER TABS -->
+  <div class="norm-tabs" id="status-tabs">
+    <div class="norm-tab active" onclick="filterStatus('all',this)">All</div>
+    <div class="norm-tab" onclick="filterStatus('Scheduled',this)">Scheduled</div>
+    <div class="norm-tab" onclick="filterStatus('Delayed',this)">Delayed</div>
+    <div class="norm-tab" onclick="filterStatus('Cancelled',this)">Cancelled</div>
+    <div class="norm-tab" onclick="filterStatus('Departed',this)">Departed</div>
+    <div class="norm-tab" onclick="filterStatus('Landed',this)">Landed</div>
+  </div>
+
+  <div class="section-card">
+    <div class="toolbar">
+      <input class="search-box" id="flight-search" placeholder="Search flight number, city, airline..." oninput="applySearch()"/>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary btn-sm" onclick="loadDelayed()">View Delayed (VIEW)</button>
+        <button class="btn btn-primary" onclick="openModal('add-flight-modal')">+ Add Flight</button>
+      </div>
+    </div>
+    <div id="flights-table"></div>
+  </div>
+
+  <!-- DELAYED FLIGHTS VIEW SECTION -->
+  <div class="section-card" id="delayed-section" style="display:none">
+    <div class="section-title">⏱ Delayed Flights — <code>delayed_flights</code> VIEW
+      <button class="btn btn-sm btn-secondary" onclick="document.getElementById('delayed-section').style.display='none'">✕</button>
+    </div>
+    <div class="code-block">SELECT * FROM delayed_flights;</div>
+    <div id="delayed-table"></div>
+  </div>
+</main>
+
+<!-- ADD FLIGHT MODAL -->
+<div class="modal-overlay" id="add-flight-modal" onclick="closeOnOverlay(event)">
+  <div class="modal">
+    <h2>Add New Flight</h2>
+    <div class="form-grid">
+      <div class="form-group"><label>Flight Number</label><input id="fn-num" placeholder="e.g. 6E-501"/></div>
+      <div class="form-group"><label>Type</label>
+        <select id="fn-type"><option value="Domestic">Domestic</option><option value="International">International</option></select>
+      </div>
+      <div class="form-group"><label>Scheduled Departure</label><input id="fn-dep" type="datetime-local"/></div>
+      <div class="form-group"><label>Scheduled Arrival</label><input id="fn-arr" type="datetime-local"/></div>
+      <div class="form-group"><label>Airline</label><select id="fn-airline"></select></div>
+      <div class="form-group"><label>Status</label>
+        <select id="fn-status">
+          <option>Scheduled</option><option>Delayed</option><option>Cancelled</option>
+          <option>Departed</option><option>Landed</option><option>Diverted</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Source Airport</label><select id="fn-src"></select></div>
+      <div class="form-group"><label>Destination Airport</label><select id="fn-dst"></select></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal('add-flight-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="addFlight()">Add Flight</button>
+    </div>
+  </div>
+</div>
+
+<!-- UPDATE STATUS MODAL -->
+<div class="modal-overlay" id="update-status-modal" onclick="closeOnOverlay(event)">
+  <div class="modal">
+    <h2>Update Flight Status</h2>
+    <input type="hidden" id="upd-fid"/>
+    <div class="form-group">
+      <label>New Status</label>
+      <select id="upd-status">
+        <option>Scheduled</option><option>Delayed</option><option>Cancelled</option>
+        <option>Departed</option><option>Landed</option><option>Diverted</option>
+      </select>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal('update-status-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="updateStatus()">Update</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/main.js"></script>
+<script>
+let allFlights = [];
+let currentStatus = 'all';
+
+async function loadFlights() {
+  allFlights = await api('/api/flights');
+  renderFlights(allFlights);
+}
+
+function renderFlights(flights) {
+  renderTable('flights-table', flights, [
+    {key:'flight_number', label:'Flight'},
+    {key:'airline_name', label:'Airline'},
+    {key:'source_city', label:'From'},
+    {key:'dest_city', label:'To'},
+    {key:'flight_type', label:'Type'},
+    {key:'scheduled_departure', label:'Departure', format:r=>fmtDt(r.scheduled_departure)},
+    {key:'scheduled_arrival', label:'Arrival', format:r=>fmtDt(r.scheduled_arrival)},
+    {key:'flight_status', label:'Status', status:true},
+  ], [
+    {label:'Edit', fn:'openUpdate', idKey:'flight_id', cls:'btn-secondary'},
+    {label:'Delete', fn:'deleteFlight', idKey:'flight_id', cls:'btn-danger'},
+  ]);
+}
+
+function filterStatus(status, el) {
+  currentStatus = status;
+  document.querySelectorAll('#status-tabs .norm-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  applySearch();
+}
+
+function applySearch() {
+  const q = document.getElementById('flight-search').value;
+  let filtered = allFlights;
+  if (currentStatus !== 'all') filtered = filtered.filter(f=>f.flight_status===currentStatus);
+  if (q) filtered = filterTable(q, filtered, ['flight_number','airline_name','source_city','dest_city']);
+  renderFlights(filtered);
+}
+
+function openUpdate(fid) {
+  document.getElementById('upd-fid').value = fid;
+  openModal('update-status-modal');
+}
+
+async function updateStatus() {
+  const fid = document.getElementById('upd-fid').value;
+  const status = document.getElementById('upd-status').value;
+  const res = await api(`/api/flights/${fid}`, 'PUT', {flight_status: status});
+  if (res.success) { toast('Status updated'); closeModal('update-status-modal'); loadFlights(); }
+  else toast(res.error, 'error');
+}
+
+async function deleteFlight(fid) {
+  if (!confirm('Delete this flight?')) return;
+  const res = await api(`/api/flights/${fid}`, 'DELETE');
+  if (res.success) { toast('Flight deleted'); loadFlights(); }
+  else toast(res.error, 'error');
+}
+
+async function addFlight() {
+  const body = {
+    flight_number: document.getElementById('fn-num').value,
+    flight_type: document.getElementById('fn-type').value,
+    scheduled_departure: document.getElementById('fn-dep').value,
+    scheduled_arrival: document.getElementById('fn-arr').value,
+    flight_status: document.getElementById('fn-status').value,
+    airline_id: document.getElementById('fn-airline').value,
+    source_airport_id: document.getElementById('fn-src').value,
+    destination_airport_id: document.getElementById('fn-dst').value,
+  };
+  const res = await api('/api/flights', 'POST', body);
+  if (res.success) { toast('Flight added'); closeModal('add-flight-modal'); loadFlights(); }
+  else toast(res.error || 'Error adding flight', 'error');
+}
+
+async function loadDelayed() {
+  const sec = document.getElementById('delayed-section');
+  sec.style.display = 'block';
+  const data = await api('/api/delayed-flights');
+  renderTable('delayed-table', data, [
+    {key:'flight_number', label:'Flight'},
+    {key:'flight_status', label:'Status', status:true},
+    {key:'from_city', label:'From'},
+    {key:'to_city', label:'To'},
+    {key:'airline_name', label:'Airline'},
+    {key:'scheduled_departure', label:'Sched. Dep.', format:r=>fmtDt(r.scheduled_departure)},
+    {key:'actual_departure', label:'Actual Dep.', format:r=>fmtDt(r.actual_departure)},
+    {key:'delay_minutes', label:'Delay (min)', format:r=>r.delay_minutes ? `<span style="color:var(--amber)">${r.delay_minutes} min</span>` : '—'},
+  ]);
+}
+
+async function init() {
+  const [airlines, airports] = await Promise.all([api('/api/airlines'), api('/api/airports')]);
+  populateSelect('fn-airline', airlines, 'airline_id', 'airline_name');
+  populateSelect('fn-src', airports, 'airport_id', r=>r, 'Source Airport');
+  // Build airport options manually for better label
+  ['fn-src','fn-dst'].forEach(id => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = '<option value="">Select Airport</option>';
+    airports.forEach(a => {
+      sel.innerHTML += `<option value="${a.airport_id}">${a.city} — ${a.airport_name}</option>`;
+    });
+  });
+  loadFlights();
+}
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Normalization — FDMS</title>
+<link rel="stylesheet" href="/static/css/main.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+</head>
+<body>
+<nav class="sidebar">
+  <div class="sidebar-logo"><span class="logo-icon">✈</span><span class="logo-text">FDMS</span></div>
+  <ul class="nav-links">
+    <li><a href="/"><span class="icon">⬛</span>Dashboard</a></li>
+    <li><a href="/flights"><span class="icon">🛫</span>Flights</a></li>
+    <li><a href="/disruptions"><span class="icon">⚡</span>Disruptions</a></li>
+    <li><a href="/crew"><span class="icon">👤</span>Crew & Pilots</a></li>
+    <li><a href="/bookings"><span class="icon">🎫</span>Bookings</a></li>
+    <li><a href="/fare"><span class="icon">💹</span>Fare & Surge</a></li>
+    <li><a href="/radar"><span class="icon">📡</span>Live Radar</a></li>
+    <li><a href="/normalization" class="active"><span class="icon">🔣</span>Normalization</a></li>
+    <li><a href="/concurrency"><span class="icon">🔒</span>Concurrency</a></li>
+    <li><a href="/analytics"><span class="icon">📊</span>Analytics</a></li>
+  </ul>
+  <div class="sidebar-footer">Flight Disruption DB</div>
+</nav>
+
+<main class="content">
+  <header class="page-header">
+    <h1>🔣 Database Normalization</h1>
+    <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">UNF → 1NF → 2NF → 3NF → BCNF → 4NF → 5NF</span>
+  </header>
+
+  <!-- NORMALIZATION PROGRESSION DIAGRAM -->
+  <div class="section-card" style="margin-bottom:24px">
+    <div class="section-title">📈 Normalization Journey</div>
+    <div style="display:flex;align-items:center;gap:0;overflow-x:auto;padding:8px 0">
+      <div class="norm-step active-step">
+        <div class="ns-label">UNF</div>
+        <div class="ns-desc">Unnormalized<br/>Repeating groups</div>
+      </div>
+      <div class="ns-arrow">→</div>
+      <div class="norm-step">
+        <div class="ns-label">1NF</div>
+        <div class="ns-desc">Atomic values<br/>No repeating</div>
+      </div>
+      <div class="ns-arrow">→</div>
+      <div class="norm-step">
+        <div class="ns-label">2NF</div>
+        <div class="ns-desc">No partial<br/>dependencies</div>
+      </div>
+      <div class="ns-arrow">→</div>
+      <div class="norm-step">
+        <div class="ns-label">3NF</div>
+        <div class="ns-desc">No transitive<br/>dependencies</div>
+      </div>
+      <div class="ns-arrow">→</div>
+      <div class="norm-step">
+        <div class="ns-label">BCNF</div>
+        <div class="ns-desc">Every determinant<br/>is candidate key</div>
+      </div>
+      <div class="ns-arrow">→</div>
+      <div class="norm-step">
+        <div class="ns-label">4NF</div>
+        <div class="ns-desc">No multi-valued<br/>dependencies</div>
+      </div>
+      <div class="ns-arrow">→</div>
+      <div class="norm-step">
+        <div class="ns-label">5NF</div>
+        <div class="ns-desc">No join<br/>dependencies</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FORM TABS -->
+  <div class="section-card">
+    <div class="norm-tabs" id="norm-tabs">
+      <div class="norm-tab active" onclick="showNorm('unf','flight_unnormalized',this)">UNF</div>
+      <div class="norm-tab" onclick="showNorm('1nf','flight_1nf',this)">1NF</div>
+      <div class="norm-tab" onclick="showNorm('2nf','flight_2nf',this)">2NF</div>
+      <div class="norm-tab" onclick="showNorm('3nf','flight_3nf',this)">3NF</div>
+      <div class="norm-tab" onclick="showNorm('bcnf','flight_pilot_bcnf',this)">BCNF</div>
+      <div class="norm-tab" onclick="showNorm('4nf_crew','flight_crew_4nf',this)">4NF (crew)</div>
+      <div class="norm-tab" onclick="showNorm('4nf_pilot','flight_pilot_4nf',this)">4NF (pilot)</div>
+      <div class="norm-tab" onclick="showNorm('5nf_crew','flight_crew_5nf',this)">5NF (crew)</div>
+      <div class="norm-tab" onclick="showNorm('5nf_pilot','flight_pilot_5nf',this)">5NF (pilot)</div>
+      <div class="norm-tab" onclick="showNorm('booking2nf','booking_2nf',this)">Booking 2NF</div>
+      <div class="norm-tab" onclick="showNorm('passenger2nf','passenger_2nf',this)">Passenger 2NF</div>
+      <div class="norm-tab" onclick="showNorm('airport3nf','airport_3nf',this)">Airport 3NF</div>
+      <div class="norm-tab" onclick="showNorm('pilot3nf','pilot_3nf',this)">Pilot 3NF</div>
+      <div class="norm-tab" onclick="showNorm('pilotbcnf','pilot_bcnf',this)">Pilot BCNF</div>
+    </div>
+
+    <!-- EXPLANATION BOX -->
+    <div id="norm-explanation" class="norm-explain"></div>
+
+    <!-- SQL query being executed -->
+    <div id="norm-query" class="code-block" style="margin-bottom:14px"></div>
+
+    <!-- Table data -->
+    <div id="norm-table"></div>
+  </div>
+</main>
+
+<style>
+.norm-step {
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 14px; min-width: 100px;
+  text-align: center;
+}
+.norm-step.active-step { border-color: var(--accent); }
+.ns-label { font-family: var(--mono); font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
+.ns-desc { font-size: 10px; color: var(--muted); line-height: 1.4; }
+.ns-arrow { font-size: 20px; color: var(--border); padding: 0 6px; align-self: center; }
+.norm-explain {
+  background: rgba(0,212,255,.05); border: 1px solid rgba(0,212,255,.15);
+  border-radius: 6px; padding: 12px 16px; margin-bottom: 14px;
+  font-size: 12px; line-height: 1.7; color: var(--text);
+}
+.norm-explain strong { color: var(--accent); }
+</style>
+
+<script src="/static/js/main.js"></script>
+<script>
+const explanations = {
+  'unf': {
+    title: 'Unnormalized Form (UNF)',
+    desc: `<strong>Problem:</strong> The flight table stores multiple pilot names and crew names as comma-separated values in a single column, and fare_classes as a list. This violates the atomicity rule.<br/><strong>Issues:</strong> Cannot query individual pilots; data duplication; insertion/deletion anomalies.`,
+    sql: 'SELECT * FROM flight_unnormalized LIMIT 10;'
+  },
+  '1nf': {
+    title: 'First Normal Form (1NF)',
+    desc: `<strong>Fix:</strong> Each attribute contains only atomic (indivisible) values. Repeating groups eliminated — one pilot, one crew member, one fare class per row.<br/><strong>Result:</strong> More rows but each cell holds a single value. Primary key is composite: (flight_id, pilot_name, crew_name, fare_class).`,
+    sql: 'SELECT * FROM flight_1nf;'
+  },
+  '2nf': {
+    title: 'Second Normal Form (2NF)',
+    desc: `<strong>Fix:</strong> All non-key attributes must be fully functionally dependent on the entire primary key (not a subset).<br/><strong>Applied:</strong> Flight details (flight_number, source, dest) depend only on flight_id. Pilot and crew details depend only on their respective IDs. Separated into flight_2nf + pilot + cabin_crew tables.`,
+    sql: 'SELECT * FROM flight_2nf;'
+  },
+  '3nf': {
+    title: 'Third Normal Form (3NF)',
+    desc: `<strong>Fix:</strong> No transitive dependencies — non-key attributes should not depend on other non-key attributes.<br/><strong>Applied:</strong> Airline details (airline_name, headquarters) moved to airline table. Airport details moved to airport table. Flight only holds foreign keys airline_id, source_airport_id, dest_airport_id.`,
+    sql: 'SELECT * FROM flight_3nf;'
+  },
+  'bcnf': {
+    title: 'Boyce-Codd Normal Form (BCNF)',
+    desc: `<strong>Fix:</strong> For every non-trivial functional dependency X→Y, X must be a superkey.<br/><strong>Applied:</strong> In crew_assignment, license_no → pilot_id was a transitive dependency (license_no is not a superkey). Resolved by separating pilot identification into flight_pilot_bcnf.`,
+    sql: 'SELECT * FROM flight_pilot_bcnf;'
+  },
+  '4nf_crew': {
+    title: '4NF — Flight-Crew (Multi-valued dependency removed)',
+    desc: `<strong>Fix:</strong> Multi-valued dependencies (MVDs) cause redundancy even in BCNF. A flight can have multiple crew AND multiple pilots independently.<br/><strong>Applied:</strong> Decomposed flight_crew and flight_pilot into separate tables — each table captures one independent multi-valued fact.`,
+    sql: 'SELECT * FROM flight_crew_4nf;'
+  },
+  '4nf_pilot': {
+    title: '4NF — Flight-Pilot',
+    desc: `<strong>Fix:</strong> Separate table for flight↔pilot multi-valued dependency, independent of crew assignments.`,
+    sql: 'SELECT * FROM flight_pilot_4nf;'
+  },
+  '5nf_crew': {
+    title: '5NF — Flight-Crew (Join dependency removed)',
+    desc: `<strong>Fix:</strong> 5NF (Project-Join Normal Form) eliminates join dependencies. The relation can be reconstructed losslessly by joining its projections.<br/><strong>Applied:</strong> flight_crew_5nf and flight_pilot_5nf are independently joinable projections. No information is lost when joining them back.`,
+    sql: 'SELECT * FROM flight_crew_5nf;'
+  },
+  '5nf_pilot': {
+    title: '5NF — Flight-Pilot',
+    desc: `<strong>Fix:</strong> Lossless join decomposition for flight-pilot. This is the final form — every join dependency is implied by the candidate keys.`,
+    sql: 'SELECT * FROM flight_pilot_5nf;'
+  },
+  'booking2nf': {
+    title: 'Booking — 2NF',
+    desc: `<strong>Applied to Booking:</strong> Passenger details (name, contact) depend only on passenger_id, not on the composite key of booking. Separated booking from passenger into distinct tables with foreign key relationship.`,
+    sql: 'SELECT * FROM booking_2nf;'
+  },
+  'passenger2nf': {
+    title: 'Passenger — 2NF',
+    desc: `<strong>Result:</strong> Passenger table holds only passenger-specific attributes. No flight or booking data mixed in, satisfying 2NF.`,
+    sql: 'SELECT * FROM passenger_2nf;'
+  },
+  'airport3nf': {
+    title: 'Airport — 3NF',
+    desc: `<strong>Applied to Airport:</strong> In the original flight table, city and country depended on airport_name (transitive: flight_id → airport_id → city). Extracted to airport_3nf, eliminating the transitive dependency.`,
+    sql: 'SELECT * FROM airport_3nf;'
+  },
+  'pilot3nf': {
+    title: 'Pilot — 3NF',
+    desc: `<strong>Applied to Pilot:</strong> All pilot attributes are fully functionally dependent on pilot_id directly. No transitive dependencies remain. fatigue_status and total_duty_hours are atomic attributes of the pilot.`,
+    sql: 'SELECT * FROM pilot_3nf;'
+  },
+  'pilotbcnf': {
+    title: 'Pilot — BCNF',
+    desc: `<strong>Applied:</strong> license_no → pilot_id is a functional dependency where license_no is a candidate key. In pilot_bcnf, license_no is the primary key, ensuring every determinant is a superkey — satisfying BCNF.`,
+    sql: 'SELECT * FROM pilot_bcnf;'
+  },
+};
+
+async function showNorm(form, tableName, el) {
+  document.querySelectorAll('.norm-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+
+  const info = explanations[form] || {};
+  document.getElementById('norm-explanation').innerHTML =
+    `<strong>${info.title||form}</strong><br/>${info.desc||''}`;
+  document.getElementById('norm-query').textContent = info.sql || `SELECT * FROM ${tableName};`;
+
+  document.getElementById('norm-table').innerHTML = '<div style="color:var(--muted);font-size:12px;padding:10px">Loading...</div>';
+  const data = await api(`/api/normalization/${form}`);
+  if (!data || data.error) {
+    document.getElementById('norm-table').innerHTML = `<div class="empty">${data?.error || 'No data'}</div>`;
+    return;
+  }
+  if (!data.length) { document.getElementById('norm-table').innerHTML = '<div class="empty">No rows found</div>'; return; }
+  const cols = Object.keys(data[0]).map(k => ({key:k, label:k.replace(/_/g,' ').toUpperCase()}));
+  renderTable('norm-table', data, cols);
+}
+
+// Load UNF by default
+showNorm('unf', 'flight_unnormalized', document.querySelector('.norm-tab.active'));
+</script>
+</body>
+</html>

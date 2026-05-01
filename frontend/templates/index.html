@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Flight Disruption Management</title>
+<link rel="stylesheet" href="/static/css/main.css"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <span class="logo-icon">✈</span>
+    <span class="logo-text">FDMS</span>
+  </div>
+  <ul class="nav-links">
+    <li><a href="/" class="active"><span class="icon">⬛</span>Dashboard</a></li>
+    <li><a href="/flights"><span class="icon">🛫</span>Flights</a></li>
+    <li><a href="/disruptions"><span class="icon">⚡</span>Disruptions</a></li>
+    <li><a href="/crew"><span class="icon">👤</span>Crew & Pilots</a></li>
+    <li><a href="/bookings"><span class="icon">🎫</span>Bookings</a></li>
+    <li><a href="/fare"><span class="icon">💹</span>Fare & Surge</a></li>
+    <li><a href="/radar"><span class="icon">📡</span>Live Radar</a></li>
+    <li><a href="/normalization"><span class="icon">🔣</span>Normalization</a></li>
+    <li><a href="/concurrency"><span class="icon">🔒</span>Concurrency</a></li>
+    <li><a href="/analytics"><span class="icon">📊</span>Analytics</a></li>
+  </ul>
+  <div class="sidebar-footer">
+    <span>Flight Disruption DB</span>
+  </div>
+</nav>
+
+<main class="content">
+  <header class="page-header">
+    <h1>Operations Dashboard</h1>
+    <div id="live-time" class="live-time"></div>
+  </header>
+
+  <!-- STAT CARDS -->
+  <div class="stats-grid">
+    <div class="stat-card red">
+      <div class="stat-label">Active Disruptions</div>
+      <div class="stat-value" id="s-disruptions">—</div>
+      <div class="stat-sub">Requires action</div>
+    </div>
+    <div class="stat-card amber">
+      <div class="stat-label">Delayed Flights</div>
+      <div class="stat-value" id="s-delayed">—</div>
+      <div class="stat-sub">Status: Delayed</div>
+    </div>
+    <div class="stat-card yellow">
+      <div class="stat-label">Fatigued Pilots</div>
+      <div class="stat-value" id="s-pilots">—</div>
+      <div class="stat-sub">Over duty limit</div>
+    </div>
+    <div class="stat-card blue">
+      <div class="stat-label">Total Flights</div>
+      <div class="stat-value" id="s-flights">—</div>
+      <div class="stat-sub">In system</div>
+    </div>
+    <div class="stat-card green">
+      <div class="stat-label">Passengers</div>
+      <div class="stat-value" id="s-passengers">—</div>
+      <div class="stat-sub">Registered</div>
+    </div>
+    <div class="stat-card purple">
+      <div class="stat-label">Bookings</div>
+      <div class="stat-value" id="s-bookings">—</div>
+      <div class="stat-sub">Total bookings</div>
+    </div>
+  </div>
+
+  <!-- QUICK VIEW PANELS -->
+  <div class="panels-grid">
+    <div class="panel">
+      <div class="panel-header">
+        <span>⚡ Active Disruptions</span>
+        <a href="/disruptions" class="panel-link">View all →</a>
+      </div>
+      <div id="dash-disruptions" class="panel-list"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        <span>🛫 Flight Status</span>
+        <a href="/flights" class="panel-link">View all →</a>
+      </div>
+      <div id="dash-flights" class="panel-list"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        <span>👤 Crew Fatigue Alerts</span>
+        <a href="/crew" class="panel-link">View all →</a>
+      </div>
+      <div id="dash-fatigue" class="panel-list"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        <span>💹 Recent Surges</span>
+        <a href="/fare" class="panel-link">View all →</a>
+      </div>
+      <div id="dash-surges" class="panel-list"></div>
+    </div>
+  </div>
+</main>
+
+<script src="/static/js/main.js"></script>
+<script>
+async function loadDashboard() {
+  const stats = await api('/api/stats');
+  document.getElementById('s-disruptions').textContent = stats.active_disruptions;
+  document.getElementById('s-delayed').textContent = stats.delayed_flights;
+  document.getElementById('s-pilots').textContent = stats.fatigued_pilots;
+  document.getElementById('s-flights').textContent = stats.total_flights;
+  document.getElementById('s-passengers').textContent = stats.total_passengers;
+  document.getElementById('s-bookings').textContent = stats.total_bookings;
+
+  // Disruptions panel
+  const disrp = await api('/api/disruptions');
+  const dd = document.getElementById('dash-disruptions');
+  dd.innerHTML = disrp.filter(d=>d.resolution_status==='Active').slice(0,5).map(d=>`
+    <div class="panel-item ${d.severity_level.toLowerCase()}">
+      <div class="pi-main">${d.flight_number} — ${d.disruption_type}</div>
+      <div class="pi-sub"><span class="badge ${d.severity_level.toLowerCase()}">${d.severity_level}</span> ${d.from_city} → ${d.to_city}</div>
+    </div>`).join('') || '<div class="empty">No active disruptions</div>';
+
+  // Flights panel
+  const flts = await api('/api/flights');
+  document.getElementById('dash-flights').innerHTML = flts.slice(0,5).map(f=>`
+    <div class="panel-item">
+      <div class="pi-main">${f.flight_number} <span class="status-tag ${f.flight_status.toLowerCase()}">${f.flight_status}</span></div>
+      <div class="pi-sub">${f.source_city} → ${f.dest_city} · ${f.airline_name}</div>
+    </div>`).join('');
+
+  // Fatigue
+  const pilots = await api('/api/pilots');
+  const fatiguedP = pilots.filter(p=>p.fatigue_status==='Fatigued');
+  const crew = await api('/api/cabin-crew');
+  const fatiguedC = crew.filter(c=>c.fatigue_status==='Fatigued');
+  const fatList = [...fatiguedP.map(p=>({name:p.pilot_name,hours:p.total_duty_hours,type:'Pilot'})),
+                   ...fatiguedC.map(c=>({name:c.crew_name,hours:c.total_duty_hours,type:'Crew'}))];
+  document.getElementById('dash-fatigue').innerHTML = fatList.slice(0,5).map(f=>`
+    <div class="panel-item critical">
+      <div class="pi-main">⚠ ${f.name}</div>
+      <div class="pi-sub">${f.type} · ${f.hours}h duty hours</div>
+    </div>`).join('') || '<div class="empty">No fatigue alerts</div>';
+
+  // Surges
+  const surges = await api('/api/surge-log');
+  document.getElementById('dash-surges').innerHTML = surges.slice(0,5).map(s=>`
+    <div class="panel-item amber">
+      <div class="pi-main">${s.flight_number} — +${s.surge_percentage}%</div>
+      <div class="pi-sub">${s.surge_reason}</div>
+    </div>`).join('') || '<div class="empty">No surges logged</div>';
+}
+
+setInterval(()=>{
+  document.getElementById('live-time').textContent = new Date().toLocaleString('en-IN',{timeZone:'Asia/Kolkata'});
+},1000);
+
+loadDashboard();
+</script>
+</body>
+</html>

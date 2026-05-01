@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Crew — FDMS</title>
+<link rel="stylesheet" href="/static/css/main.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+</head>
+<body>
+<nav class="sidebar">
+  <div class="sidebar-logo"><span class="logo-icon">✈</span><span class="logo-text">FDMS</span></div>
+  <ul class="nav-links">
+    <li><a href="/"><span class="icon">⬛</span>Dashboard</a></li>
+    <li><a href="/flights"><span class="icon">🛫</span>Flights</a></li>
+    <li><a href="/disruptions"><span class="icon">⚡</span>Disruptions</a></li>
+    <li><a href="/crew" class="active"><span class="icon">👤</span>Crew & Pilots</a></li>
+    <li><a href="/bookings"><span class="icon">🎫</span>Bookings</a></li>
+    <li><a href="/fare"><span class="icon">💹</span>Fare & Surge</a></li>
+    <li><a href="/radar"><span class="icon">📡</span>Live Radar</a></li>
+    <li><a href="/normalization"><span class="icon">🔣</span>Normalization</a></li>
+    <li><a href="/concurrency"><span class="icon">🔒</span>Concurrency</a></li>
+    <li><a href="/analytics"><span class="icon">📊</span>Analytics</a></li>
+  </ul>
+  <div class="sidebar-footer">Flight Disruption DB</div>
+</nav>
+
+<main class="content">
+  <header class="page-header">
+    <h1>👤 Crew & Pilot Management</h1>
+    <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">Triggers · Constraints · Cursor · DML</span>
+  </header>
+
+  <!-- TRIGGER INFO -->
+  <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:14px 18px;margin-bottom:20px">
+    <div style="font-size:12px;font-weight:700;color:var(--amber);margin-bottom:6px">⚠ Fatigue Safety System</div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.8">
+      <code>trg_prevent_fatigued_pilot</code> — Blocks assignment of fatigued pilots (BEFORE INSERT)<br/>
+      <code>trg_prevent_fatigued_crew</code> — Blocks assignment of fatigued cabin crew (BEFORE INSERT)<br/>
+      <code>trg_update_pilot_duty_hours</code> — Auto-updates duty hours and fatigue status (AFTER INSERT)<br/>
+      <code>sp_scan_fatigue()</code> — Stored procedure with CURSOR to batch-flag fatigued crew
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+
+    <!-- PILOTS -->
+    <div class="section-card">
+      <div class="section-title">✈ Pilots
+        <button class="btn btn-sm btn-primary" onclick="openModal('add-pilot-modal')" style="margin-left:auto">+ Add</button>
+      </div>
+      <div id="pilots-table"></div>
+    </div>
+
+    <!-- CABIN CREW -->
+    <div class="section-card">
+      <div class="section-title">🧑‍✈️ Cabin Crew
+        <button class="btn btn-sm btn-primary" onclick="openModal('add-crew-modal')" style="margin-left:auto">+ Add</button>
+      </div>
+      <div id="crew-table"></div>
+    </div>
+  </div>
+
+  <!-- CREW ASSIGNMENTS -->
+  <div class="section-card">
+    <div class="section-title">📋 Crew Assignments
+      <button class="btn btn-sm btn-primary" onclick="openModal('assign-modal')" style="margin-left:auto">+ Assign</button>
+    </div>
+    <div class="code-block">-- CONSTRAINT: duty_hours BETWEEN 0 AND 14
+-- TRIGGER: Blocks fatigued crew; auto-increments duty hours</div>
+    <div id="assignments-table"></div>
+  </div>
+
+  <!-- CURSOR DEMO -->
+  <div class="section-card">
+    <div class="section-title">🔁 Cursor: Fatigue Batch Scan</div>
+    <div class="code-block">-- Stored Procedure with CURSOR (sp_scan_fatigue)
+DECLARE cur_crew CURSOR FOR SELECT crew_id, crew_name, total_duty_hours FROM cabin_crew;
+LOOP → IF duty_hours > 8 → UPDATE fatigue_status = 'Fatigued'</div>
+    <div style="display:flex;gap:12px;align-items:center;margin-top:12px">
+      <button class="btn btn-amber" onclick="runCursorScan()">▶ Run Fatigue Scan (Cursor)</button>
+      <span id="cursor-status" style="font-size:12px;color:var(--muted)"></span>
+    </div>
+    <div id="cursor-results" style="margin-top:12px"></div>
+  </div>
+
+  <!-- FATIGUE LOG -->
+  <div class="section-card">
+    <div class="section-title">📊 Crew Fatigue Log</div>
+    <div id="fatigue-table"></div>
+  </div>
+</main>
+
+<!-- ADD PILOT -->
+<div class="modal-overlay" id="add-pilot-modal" onclick="closeOnOverlay(event)">
+  <div class="modal">
+    <h2>Add Pilot</h2>
+    <div class="form-grid">
+      <div class="form-group"><label>Name</label><input id="p-name" placeholder="Capt. Full Name"/></div>
+      <div class="form-group"><label>License No.</label><input id="p-lic" placeholder="DGCA-PIL-XXX"/></div>
+      <div class="form-group"><label>Experience (yrs)</label><input id="p-exp" type="number" min="0" placeholder="0"/></div>
+      <div class="form-group"><label>Fatigue Status</label>
+        <select id="p-fatigue"><option>Active</option><option>Fatigued</option><option>On Leave</option></select>
+      </div>
+      <div class="form-group"><label>Total Duty Hours</label><input id="p-hours" type="number" step="0.1" min="0" placeholder="0"/></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal('add-pilot-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="addPilot()">Add Pilot</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD CREW -->
+<div class="modal-overlay" id="add-crew-modal" onclick="closeOnOverlay(event)">
+  <div class="modal">
+    <h2>Add Cabin Crew</h2>
+    <div class="form-grid">
+      <div class="form-group"><label>Name</label><input id="c-name" placeholder="Full Name"/></div>
+      <div class="form-group"><label>Experience (yrs)</label><input id="c-exp" type="number" min="0" placeholder="0"/></div>
+      <div class="form-group"><label>Fatigue Status</label>
+        <select id="c-fatigue"><option>Active</option><option>Fatigued</option><option>On Leave</option></select>
+      </div>
+      <div class="form-group"><label>Total Duty Hours</label><input id="c-hours" type="number" step="0.1" min="0" placeholder="0"/></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal('add-crew-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="addCrew()">Add Crew Member</button>
+    </div>
+  </div>
+</div>
+
+<!-- ASSIGN CREW MODAL -->
+<div class="modal-overlay" id="assign-modal" onclick="closeOnOverlay(event)">
+  <div class="modal">
+    <h2>Assign Crew to Flight</h2>
+    <div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:12px;color:var(--red)">
+      ⚠ Trigger will BLOCK if selected crew/pilot is marked Fatigued
+    </div>
+    <div class="form-grid">
+      <div class="form-group"><label>Flight</label><select id="as-flight"></select></div>
+      <div class="form-group"><label>Role</label>
+        <select id="as-role"><option>Captain</option><option>First Officer</option><option>Cabin Crew</option><option>Purser</option></select>
+      </div>
+      <div class="form-group"><label>Pilot (optional)</label><select id="as-pilot"><option value="">— None —</option></select></div>
+      <div class="form-group"><label>Cabin Crew (optional)</label><select id="as-crew"><option value="">— None —</option></select></div>
+      <div class="form-group"><label>Duty Start</label><input id="as-start" type="datetime-local"/></div>
+      <div class="form-group"><label>Duty End</label><input id="as-end" type="datetime-local"/></div>
+      <div class="form-group"><label>Duty Hours</label><input id="as-hours" type="number" step="0.5" min="0.5" max="14" placeholder="e.g. 4.5"/></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal('assign-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="assignCrew()">Assign Crew</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/main.js"></script>
+<script>
+async function loadAll() {
+  const [pilots, crew, assignments, fatigue] = await Promise.all([
+    api('/api/pilots'), api('/api/cabin-crew'),
+    api('/api/crew-assignments'), api('/api/fatigue-log')
+  ]);
+
+  renderTable('pilots-table', pilots, [
+    {key:'pilot_name', label:'Name'},
+    {key:'license_no', label:'License'},
+    {key:'experience_years', label:'Exp (yr)'},
+    {key:'total_duty_hours', label:'Duty Hrs'},
+    {key:'fatigue_status', label:'Status', status:true},
+  ]);
+
+  renderTable('crew-table', crew, [
+    {key:'crew_name', label:'Name'},
+    {key:'experience_years', label:'Exp (yr)'},
+    {key:'total_duty_hours', label:'Duty Hrs'},
+    {key:'fatigue_status', label:'Status', status:true},
+  ]);
+
+  renderTable('assignments-table', assignments, [
+    {key:'flight_number', label:'Flight'},
+    {key:'role', label:'Role'},
+    {key:'pilot_name', label:'Pilot'},
+    {key:'crew_name', label:'Crew'},
+    {key:'duty_hours', label:'Hours'},
+    {key:'pilot_fatigue', label:'Pilot Status', status:true},
+    {key:'crew_fatigue', label:'Crew Status', status:true},
+  ]);
+
+  renderTable('fatigue-table', fatigue, [
+    {key:'pilot_name', label:'Pilot'},
+    {key:'crew_name', label:'Crew'},
+    {key:'flight_number', label:'Flight'},
+    {key:'fatigue_level', label:'Fatigue Level', badge:true},
+    {key:'recorded_time', label:'Recorded', format:r=>fmtDt(r.recorded_time)},
+  ]);
+
+  // Populate assignment selects
+  populateSelect('as-pilot', pilots, 'pilot_id',
+    p=>p, 'None');
+  const pilotSel = document.getElementById('as-pilot');
+  pilotSel.innerHTML = '<option value="">— None —</option>';
+  pilots.forEach(p => {
+    pilotSel.innerHTML += `<option value="${p.pilot_id}" ${p.fatigue_status==='Fatigued'?'style="color:var(--red)"':''}>${p.pilot_name} [${p.fatigue_status}]</option>`;
+  });
+  const crewSel = document.getElementById('as-crew');
+  crewSel.innerHTML = '<option value="">— None —</option>';
+  crew.forEach(c => {
+    crewSel.innerHTML += `<option value="${c.crew_id}" ${c.fatigue_status==='Fatigued'?'style="color:var(--red)"':''}>${c.crew_name} [${c.fatigue_status}]</option>`;
+  });
+}
+
+async function addPilot() {
+  const body = {
+    pilot_name: document.getElementById('p-name').value,
+    license_no: document.getElementById('p-lic').value,
+    experience_years: document.getElementById('p-exp').value || 0,
+    fatigue_status: document.getElementById('p-fatigue').value,
+    total_duty_hours: document.getElementById('p-hours').value || 0,
+  };
+  const res = await api('/api/pilots', 'POST', body);
+  if (res.success) { toast('Pilot added'); closeModal('add-pilot-modal'); loadAll(); }
+  else toast(res.error, 'error');
+}
+
+async function addCrew() {
+  const body = {
+    crew_name: document.getElementById('c-name').value,
+    experience_years: document.getElementById('c-exp').value || 0,
+    fatigue_status: document.getElementById('c-fatigue').value,
+    total_duty_hours: document.getElementById('c-hours').value || 0,
+  };
+  const res = await api('/api/cabin-crew', 'POST', body);
+  if (res.success) { toast('Crew member added'); closeModal('add-crew-modal'); loadAll(); }
+  else toast(res.error, 'error');
+}
+
+async function assignCrew() {
+  const body = {
+    flight_id: document.getElementById('as-flight').value,
+    role: document.getElementById('as-role').value,
+    pilot_id: document.getElementById('as-pilot').value || null,
+    crew_id: document.getElementById('as-crew').value || null,
+    duty_start_time: document.getElementById('as-start').value,
+    duty_end_time: document.getElementById('as-end').value,
+    duty_hours: document.getElementById('as-hours').value,
+  };
+  if (!body.flight_id || !body.duty_start_time) { toast('Fill required fields', 'warn'); return; }
+  const res = await api('/api/crew-assignments', 'POST', body);
+  if (res.success) { toast('Crew assigned successfully'); closeModal('assign-modal'); loadAll(); }
+  else toast(res.error, 'error');
+}
+
+async function runCursorScan() {
+  document.getElementById('cursor-status').textContent = 'Running cursor scan...';
+  const res = await api('/api/cursor/fatigue-scan');
+  document.getElementById('cursor-status').textContent = res.message;
+  if (res.flagged && res.flagged.length > 0) {
+    document.getElementById('cursor-results').innerHTML = `
+      <div class="table-wrap"><table>
+        <thead><tr><th>Crew Member</th><th>Duty Hours</th><th>Action</th></tr></thead>
+        <tbody>${res.flagged.map(f=>`<tr>
+          <td>${f.crew_name}</td><td style="font-family:var(--mono)">${f.duty_hours}h</td>
+          <td><span class="badge critical">${f.action}</span></td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+    toast(`Cursor scan complete: ${res.flagged.length} crew flagged`);
+    loadAll();
+  } else {
+    document.getElementById('cursor-results').innerHTML = '<div class="empty">No crew flagged — all within duty limits</div>';
+    toast('Cursor scan complete — no violations found', 'warn');
+  }
+}
+
+async function init() {
+  const flights = await api('/api/flights');
+  const flSel = document.getElementById('as-flight');
+  flSel.innerHTML = '<option value="">Select Flight</option>';
+  flights.forEach(f => { flSel.innerHTML += `<option value="${f.flight_id}">${f.flight_number} — ${f.source_city} → ${f.dest_city}</option>`; });
+  loadAll();
+}
+init();
+</script>
+</body>
+</html>

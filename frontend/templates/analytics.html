@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Analytics — FDMS</title>
+<link rel="stylesheet" href="/static/css/main.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+</head>
+<body>
+<nav class="sidebar">
+  <div class="sidebar-logo"><span class="logo-icon">✈</span><span class="logo-text">FDMS</span></div>
+  <ul class="nav-links">
+    <li><a href="/"><span class="icon">⬛</span>Dashboard</a></li>
+    <li><a href="/flights"><span class="icon">🛫</span>Flights</a></li>
+    <li><a href="/disruptions"><span class="icon">⚡</span>Disruptions</a></li>
+    <li><a href="/crew"><span class="icon">👤</span>Crew & Pilots</a></li>
+    <li><a href="/bookings"><span class="icon">🎫</span>Bookings</a></li>
+    <li><a href="/fare"><span class="icon">💹</span>Fare & Surge</a></li>
+    <li><a href="/radar"><span class="icon">📡</span>Live Radar</a></li>
+    <li><a href="/normalization"><span class="icon">🔣</span>Normalization</a></li>
+    <li><a href="/concurrency"><span class="icon">🔒</span>Concurrency</a></li>
+    <li><a href="/analytics" class="active"><span class="icon">📊</span>Analytics</a></li>
+  </ul>
+  <div class="sidebar-footer">Flight Disruption DB</div>
+</nav>
+
+<main class="content">
+  <header class="page-header">
+    <h1>📊 Analytics & Queries</h1>
+    <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">Aggregate · GROUP BY · SET Ops · Subqueries · JOINs</span>
+  </header>
+
+  <!-- DISRUPTIONS BY TYPE (aggregate + GROUP BY) -->
+  <div class="section-card" style="margin-bottom:24px">
+    <div class="section-title">⚡ Disruptions by Type</div>
+    <div class="code-block" style="font-size:10px;margin-bottom:14px">SELECT disruption_type, COUNT(*) AS count,
+       SUM(CASE WHEN resolution_status='Active' THEN 1 ELSE 0 END) AS active
+FROM disruption_event
+GROUP BY disruption_type;</div>
+    <div id="disruptions-chart"></div>
+    <div id="disruptions-by-type" style="margin-top:14px"></div>
+  </div>
+
+  <!-- FLIGHTS BY AIRLINE -->
+  <div class="section-card" style="margin-bottom:24px">
+    <div class="section-title">✈ Flights by Airline — COUNT, SUM with CASE WHEN</div>
+    <div class="code-block" style="font-size:10px;margin-bottom:14px">SELECT al.airline_name,
+       COUNT(f.flight_id) AS total_flights,
+       SUM(CASE WHEN f.flight_status='Delayed' THEN 1 ELSE 0 END) AS delayed,
+       SUM(CASE WHEN f.flight_status='Cancelled' THEN 1 ELSE 0 END) AS cancelled
+FROM flight f JOIN airline al ON f.airline_id=al.airline_id
+GROUP BY al.airline_id, al.airline_name;</div>
+    <div id="airlines-chart"></div>
+    <div id="flights-by-airline" style="margin-top:14px"></div>
+  </div>
+
+  <!-- FARE STATISTICS (MIN, MAX, AVG) -->
+  <div class="section-card" style="margin-bottom:24px">
+    <div class="section-title">💰 Fare Statistics — MIN · MAX · AVG · COUNT</div>
+    <div class="code-block" style="font-size:10px;margin-bottom:14px">SELECT f.flight_number,
+       MIN(b.total_fare) AS min_fare, MAX(b.total_fare) AS max_fare,
+       AVG(b.total_fare) AS avg_fare, COUNT(b.booking_id) AS bookings
+FROM booking b JOIN flight f ON b.flight_id=f.flight_id
+GROUP BY f.flight_id, f.flight_number;</div>
+    <div id="fare-stats-table"></div>
+  </div>
+
+  <!-- SET OPERATIONS DEMO -->
+  <div class="section-card" style="margin-bottom:24px">
+    <div class="section-title">🔗 Set Operations — UNION · INTERSECT · EXCEPT
+      <button class="btn btn-sm btn-secondary" onclick="loadSetOps()" style="margin-left:auto">Run Set Ops</button>
+    </div>
+    <div class="code-block" style="font-size:10px;margin-bottom:14px">-- UNION: fatigued pilots ∪ assigned pilots
+-- INTERSECT: fatigued AND currently assigned (SAFETY RISK!)
+-- EXCEPT: fatigued but NOT assigned (safe)</div>
+    <div id="set-ops-result"></div>
+  </div>
+
+  <!-- SUBQUERY DEMO -->
+  <div class="section-card" style="margin-bottom:24px">
+    <div class="section-title">🔍 Subquery — Above-Average Surge
+      <button class="btn btn-sm btn-secondary" onclick="loadSubquery()" style="margin-left:auto">Run Subquery</button>
+    </div>
+    <div class="code-block" style="font-size:10px;margin-bottom:14px">SELECT * FROM price_surge_log
+WHERE surge_percentage > (
+    SELECT AVG(surge_percentage) FROM price_surge_log
+)
+ORDER BY surge_percentage DESC;</div>
+    <div id="subquery-result"></div>
+  </div>
+
+  <!-- JOIN SHOWCASE -->
+  <div class="section-card">
+    <div class="section-title">🔀 JOIN Types Showcase</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:6px">INNER JOIN</div>
+        <div class="code-block" style="font-size:10px">SELECT f.flight_number, al.airline_name
+FROM flight f
+INNER JOIN airline al ON f.airline_id = al.airline_id;</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">Returns only flights that have a matching airline record.</div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:6px">LEFT JOIN</div>
+        <div class="code-block" style="font-size:10px">SELECT p.passenger_name, b.booking_id
+FROM passenger p
+LEFT JOIN booking b ON p.passenger_id = b.passenger_id;</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">Returns all passengers, including those without bookings.</div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:6px">MULTI-TABLE JOIN</div>
+        <div class="code-block" style="font-size:10px">SELECT f.flight_number, al.airline_name,
+       src.city AS from, dst.city AS to
+FROM flight f
+JOIN airline al ON f.airline_id = al.airline_id
+JOIN airport src ON f.source_airport_id = src.airport_id
+JOIN airport dst ON f.destination_airport_id = dst.airport_id;</div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:6px">JOIN with Subquery</div>
+        <div class="code-block" style="font-size:10px">SELECT md.*, de.disruption_type
+FROM management_decision md
+JOIN disruption_event de ON md.disruption_id = de.disruption_id
+WHERE de.severity_level IN (
+    SELECT DISTINCT severity_level FROM disruption_event
+    WHERE resolution_status = 'Active'
+);</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="/static/js/main.js"></script>
+<script>
+function drawBarChart(containerId, data, labelKey, valueKey, colorClass='') {
+  const max = Math.max(...data.map(d=>Number(d[valueKey])||0));
+  const html = `<div class="bar-chart">
+    ${data.map((d,i)=>{
+      const pct = max > 0 ? (Number(d[valueKey])/max)*100 : 0;
+      const colors = ['','red','amber','green','purple'];
+      const cls = colorClass || colors[i%colors.length];
+      return `<div class="bar-wrap">
+        <div class="bar-val">${d[valueKey]||0}</div>
+        <div class="bar ${cls}" style="height:${Math.max(pct,4)}%"></div>
+        <div class="bar-label">${(d[labelKey]||'').substring(0,10)}</div>
+      </div>`;
+    }).join('')}
+  </div>`;
+  document.getElementById(containerId).innerHTML = html;
+}
+
+async function loadAll() {
+  const [byType, byAirline, fareStats] = await Promise.all([
+    api('/api/analytics/disruptions-by-type'),
+    api('/api/analytics/flights-by-airline'),
+    api('/api/analytics/fare-stats'),
+  ]);
+
+  drawBarChart('disruptions-chart', byType, 'disruption_type', 'count', 'red');
+  renderTable('disruptions-by-type', byType, [
+    {key:'disruption_type', label:'Type'},
+    {key:'count', label:'Total Count'},
+    {key:'active', label:'Active'},
+  ]);
+
+  drawBarChart('airlines-chart', byAirline, 'airline_name', 'total_flights');
+  renderTable('flights-by-airline', byAirline, [
+    {key:'airline_name', label:'Airline'},
+    {key:'total_flights', label:'Total Flights'},
+    {key:'delayed', label:'Delayed', format:r=>`<span style="color:var(--amber)">${r.delayed}</span>`},
+    {key:'cancelled', label:'Cancelled', format:r=>`<span style="color:var(--red)">${r.cancelled}</span>`},
+  ]);
+
+  renderTable('fare-stats-table', fareStats, [
+    {key:'flight_number', label:'Flight'},
+    {key:'min_fare', label:'MIN Fare', format:r=>`₹${Number(r.min_fare||0).toLocaleString()}`},
+    {key:'max_fare', label:'MAX Fare', format:r=>`₹${Number(r.max_fare||0).toLocaleString()}`},
+    {key:'avg_fare', label:'AVG Fare', format:r=>`₹${Number(r.avg_fare||0).toFixed(0)}`},
+    {key:'bookings', label:'Bookings'},
+  ]);
+}
+
+async function loadSetOps() {
+  const data = await api('/api/analytics/set-operations');
+  document.getElementById('set-ops-result').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:6px">⚠ INTERSECT — Fatigued AND Assigned (Safety Risk)</div>
+        <div class="code-block">[${data.fatigued_AND_assigned_INTERSECT.join(', ') || 'none'}]
+Pilot IDs that are fatigued BUT still have active assignments!</div>
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--green);margin-bottom:6px">✓ EXCEPT — Fatigued but NOT Assigned (Safe)</div>
+        <div class="code-block">[${data.fatigued_NOT_assigned_EXCEPT.join(', ') || 'none'}]
+Fatigued pilots correctly kept off assignments.</div>
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:6px">UNION — All Fatigued Pilot IDs</div>
+        <div class="code-block">[${data.fatigued_pilots.join(', ') || 'none'}]</div>
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">Assigned Pilot IDs</div>
+        <div class="code-block">[${data.assigned_pilots.join(', ') || 'none'}]</div>
+      </div>
+    </div>`;
+}
+
+async function loadSubquery() {
+  const data = await api('/api/analytics/above-avg-surge');
+  renderTable('subquery-result', data, [
+    {key:'flight_number', label:'Flight'},
+    {key:'surge_percentage', label:'Surge %', format:r=>`<span style="font-family:var(--mono);color:var(--red);font-weight:700">+${r.surge_percentage}%</span>`},
+    {key:'surge_reason', label:'Reason'},
+  ]);
+}
+
+loadAll();
+</script>
+</body>
+</html>

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Fare & Surge — FDMS</title>
+<link rel="stylesheet" href="/static/css/main.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+</head>
+<body>
+<nav class="sidebar">
+  <div class="sidebar-logo"><span class="logo-icon">✈</span><span class="logo-text">FDMS</span></div>
+  <ul class="nav-links">
+    <li><a href="/"><span class="icon">⬛</span>Dashboard</a></li>
+    <li><a href="/flights"><span class="icon">🛫</span>Flights</a></li>
+    <li><a href="/disruptions"><span class="icon">⚡</span>Disruptions</a></li>
+    <li><a href="/crew"><span class="icon">👤</span>Crew & Pilots</a></li>
+    <li><a href="/bookings"><span class="icon">🎫</span>Bookings</a></li>
+    <li><a href="/fare" class="active"><span class="icon">💹</span>Fare & Surge</a></li>
+    <li><a href="/radar"><span class="icon">📡</span>Live Radar</a></li>
+    <li><a href="/normalization"><span class="icon">🔣</span>Normalization</a></li>
+    <li><a href="/concurrency"><span class="icon">🔒</span>Concurrency</a></li>
+    <li><a href="/analytics"><span class="icon">📊</span>Analytics</a></li>
+  </ul>
+  <div class="sidebar-footer">Flight Disruption DB</div>
+</nav>
+
+<main class="content">
+  <header class="page-header">
+    <h1>💹 Fare Policy & Surge Control</h1>
+    <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">Views · Triggers · Subqueries · Constraints</span>
+  </header>
+
+  <!-- FARE POLICIES -->
+  <div class="section-card">
+    <div class="section-title">📋 Fare Policies
+      <button class="btn btn-sm btn-primary" onclick="openModal('add-policy-modal')" style="margin-left:auto">+ Add Policy</button>
+    </div>
+    <div class="code-block" style="font-size:10px;margin-bottom:10px">-- CONSTRAINT: max_price_multiplier BETWEEN 1.0 AND 5.0
+-- Policy per disruption type; enforces ethical surge cap</div>
+    <div id="policies-table"></div>
+  </div>
+
+  <!-- SURGE VIEW -->
+  <div class="section-card">
+    <div class="section-title">📊 Surge View — <code>surge_view</code>
+      <button class="btn btn-sm btn-secondary" onclick="loadSurgeView()" style="margin-left:auto">↺ Refresh</button>
+    </div>
+    <div class="code-block" style="font-size:10px;margin-bottom:10px">-- View joins price_surge_log + fare_policy to check compliance
+SELECT ..., CASE WHEN surge > max_multiplier THEN 'POLICY VIOLATED' ELSE 'Within Policy' END
+FROM surge_view;</div>
+    <div id="surge-view-table"></div>
+  </div>
+
+  <!-- SURGE LOG -->
+  <div class="section-card">
+    <div class="section-title">⚡ Price Surge Log
+      <span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">Auto-populated by trigger <code>trg_log_surge_on_disruption</code></span>
+    </div>
+    <div id="surge-table"></div>
+  </div>
+
+  <!-- ABOVE-AVG SURGE (subquery demo) -->
+  <div class="section-card">
+    <div class="section-title">🔍 Above-Average Surges — Subquery Demo
+      <button class="btn btn-sm btn-secondary" onclick="loadAboveAvg()" style="margin-left:auto">Run Query</button>
+    </div>
+    <div class="code-block" style="font-size:11px">SELECT * FROM price_surge_log
+WHERE surge_percentage > (SELECT AVG(surge_percentage) FROM price_surge_log)
+ORDER BY surge_percentage DESC;</div>
+    <div id="above-avg-table" style="margin-top:12px"></div>
+  </div>
+</main>
+
+<!-- ADD FARE POLICY -->
+<div class="modal-overlay" id="add-policy-modal" onclick="closeOnOverlay(event)">
+  <div class="modal">
+    <h2>Add Fare Policy</h2>
+    <div class="form-grid">
+      <div class="form-group"><label>Disruption Type</label>
+        <select id="fp-type">
+          <option>Weather</option><option>Technical</option><option>Crew</option>
+          <option>ATC</option><option>Security</option><option>Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Max Price Multiplier</label>
+        <input id="fp-mult" type="number" step="0.05" min="1" max="5" placeholder="e.g. 1.20"/>
+      </div>
+      <div class="form-group"><label>Applicable Duration (hours)</label>
+        <input id="fp-dur" type="number" min="1" placeholder="e.g. 24"/>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">CONSTRAINT: multiplier must be between 1.0 and 5.0</div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal('add-policy-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="addPolicy()">Add Policy</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/main.js"></script>
+<script>
+async function loadAll() {
+  const [policies, surges] = await Promise.all([
+    api('/api/fare-policies'), api('/api/surge-log')
+  ]);
+
+  renderTable('policies-table', policies, [
+    {key:'policy_id', label:'ID'},
+    {key:'disruption_type', label:'Disruption Type'},
+    {key:'max_price_multiplier', label:'Max Multiplier', format:r=>`<span style="font-family:var(--mono);color:var(--amber)">${r.max_price_multiplier}×</span>`},
+    {key:'applicable_duration', label:'Duration (hrs)'},
+  ]);
+
+  renderTable('surge-table', surges, [
+    {key:'flight_number', label:'Flight'},
+    {key:'surge_percentage', label:'Surge %', format:r=>`<span style="font-family:var(--mono);color:var(--red)">+${r.surge_percentage}%</span>`},
+    {key:'surge_reason', label:'Reason'},
+    {key:'surge_time', label:'Time', format:r=>fmtDt(r.surge_time)},
+  ]);
+}
+
+async function loadSurgeView() {
+  const data = await api('/api/surge-view');
+  renderTable('surge-view-table', data, [
+    {key:'flight_number', label:'Flight'},
+    {key:'flight_status', label:'Status', status:true},
+    {key:'surge_percentage', label:'Surge %', format:r=>`<span style="font-family:var(--mono)">${r.surge_percentage}%</span>`},
+    {key:'max_price_multiplier', label:'Policy Cap'},
+    {key:'surge_reason', label:'Reason'},
+    {key:'policy_compliance', label:'Compliance', format:r=>{
+      const v = r.policy_compliance;
+      const cls = v === 'POLICY VIOLATED' ? 'critical' : 'low';
+      return `<span class="badge ${cls}">${v||'—'}</span>`;
+    }},
+  ]);
+}
+
+async function loadAboveAvg() {
+  const data = await api('/api/analytics/above-avg-surge');
+  if (!data.length) { document.getElementById('above-avg-table').innerHTML = '<div class="empty">No above-average surges found</div>'; return; }
+  renderTable('above-avg-table', data, [
+    {key:'flight_number', label:'Flight'},
+    {key:'surge_percentage', label:'Surge %', format:r=>`<span style="font-family:var(--mono);color:var(--red);font-weight:700">+${r.surge_percentage}%</span>`},
+    {key:'surge_reason', label:'Reason'},
+  ]);
+}
+
+async function addPolicy() {
+  const body = {
+    disruption_type: document.getElementById('fp-type').value,
+    max_price_multiplier: document.getElementById('fp-mult').value,
+    applicable_duration: document.getElementById('fp-dur').value,
+  };
+  if (!body.max_price_multiplier || !body.applicable_duration) { toast('Fill all fields', 'warn'); return; }
+  const res = await api('/api/fare-policies', 'POST', body);
+  if (res.success) { toast('Policy added'); closeModal('add-policy-modal'); loadAll(); }
+  else toast(res.error, 'error');
+}
+
+loadAll();
+loadSurgeView();
+</script>
+</body>
+</html>

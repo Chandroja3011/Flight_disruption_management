@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Bookings — FDMS</title>
+<link rel="stylesheet" href="/static/css/main.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+</head>
+<body>
+<nav class="sidebar">
+  <div class="sidebar-logo"><span class="logo-icon">✈</span><span class="logo-text">FDMS</span></div>
+  <ul class="nav-links">
+    <li><a href="/"><span class="icon">⬛</span>Dashboard</a></li>
+    <li><a href="/flights"><span class="icon">🛫</span>Flights</a></li>
+    <li><a href="/disruptions"><span class="icon">⚡</span>Disruptions</a></li>
+    <li><a href="/crew"><span class="icon">👤</span>Crew & Pilots</a></li>
+    <li><a href="/bookings" class="active"><span class="icon">🎫</span>Bookings</a></li>
+    <li><a href="/fare"><span class="icon">💹</span>Fare & Surge</a></li>
+    <li><a href="/radar"><span class="icon">📡</span>Live Radar</a></li>
+    <li><a href="/normalization"><span class="icon">🔣</span>Normalization</a></li>
+    <li><a href="/concurrency"><span class="icon">🔒</span>Concurrency</a></li>
+    <li><a href="/analytics"><span class="icon">📊</span>Analytics</a></li>
+  </ul>
+  <div class="sidebar-footer">Flight Disruption DB</div>
+</nav>
+
+<main class="content">
+  <header class="page-header">
+    <h1>🎫 Bookings & Passengers</h1>
+    <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">JOIN · View · Constraints · DML</span>
+  </header>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+    <!-- PASSENGERS -->
+    <div class="section-card">
+      <div class="section-title">👥 Passengers
+        <button class="btn btn-sm btn-primary" onclick="openModal('add-pax-modal')" style="margin-left:auto">+ Add</button>
+      </div>
+      <div id="passengers-table"></div>
+    </div>
+
+    <!-- PASSENGER VIEW -->
+    <div class="section-card">
+      <div class="section-title">📊 Passenger View
+        <button class="btn btn-sm btn-secondary" onclick="loadPassengerView()" style="margin-left:auto">↺ Refresh View</button>
+      </div>
+      <div class="code-block" style="font-size:10px;margin-bottom:12px">SELECT p.*, COUNT(b.booking_id), SUM(b.total_fare)
+FROM passenger p LEFT JOIN booking b ON ...
+GROUP BY p.passenger_id → passenger_view</div>
+      <div id="pax-view-table"></div>
+    </div>
+  </div>
+
+  <!-- BOOKINGS -->
+  <div class="section-card">
+    <div class="section-title">🎫 All Bookings
+      <button class="btn btn-sm btn-primary" onclick="openModal('add-booking-modal')" style="margin-left:auto">+ New Booking</button>
+    </div>
+    <div class="toolbar">
+      <input class="search-box" id="bk-search" placeholder="Search passenger, flight, city..." oninput="applySearch()"/>
+    </div>
+    <div id="bookings-table"></div>
+  </div>
+</main>
+
+<!-- ADD PASSENGER -->
+<div class="modal-overlay" id="add-pax-modal" onclick="closeOnOverlay(event)">
+  <div class="modal">
+    <h2>Add Passenger</h2>
+    <div class="form-grid">
+      <div class="form-group"><label>Name</label><input id="pax-name" placeholder="Full Name"/></div>
+      <div class="form-group"><label>Contact No.</label><input id="pax-contact" placeholder="+91-XXXXXXXXXX"/></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal('add-pax-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="addPassenger()">Add Passenger</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD BOOKING -->
+<div class="modal-overlay" id="add-booking-modal" onclick="closeOnOverlay(event)">
+  <div class="modal">
+    <h2>New Booking</h2>
+    <div class="code-block" style="font-size:10px;margin-bottom:14px">CONSTRAINT: total_fare >= base_fare
+CONSTRAINT: UNIQUE (passenger_id, flight_id)</div>
+    <div class="form-grid">
+      <div class="form-group"><label>Passenger</label><select id="bk-pax"></select></div>
+      <div class="form-group"><label>Flight</label><select id="bk-flight"></select></div>
+      <div class="form-group"><label>Base Fare (₹)</label><input id="bk-base" type="number" min="1" placeholder="e.g. 3500"/></div>
+      <div class="form-group"><label>Total Fare (₹)</label><input id="bk-total" type="number" min="1" placeholder="e.g. 4200"/></div>
+      <div class="form-group"><label>Booking Date</label><input id="bk-date" type="date"/></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal('add-booking-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="addBooking()">Confirm Booking</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/main.js"></script>
+<script>
+let allBookings = [];
+let allPassengers = [];
+
+async function loadAll() {
+  [allBookings, allPassengers] = await Promise.all([
+    api('/api/bookings'), api('/api/passengers')
+  ]);
+  renderPassengers(allPassengers);
+  renderBookings(allBookings);
+}
+
+function renderPassengers(data) {
+  renderTable('passengers-table', data, [
+    {key:'passenger_id', label:'ID'},
+    {key:'passenger_name', label:'Name'},
+    {key:'contact_no', label:'Contact'},
+  ]);
+}
+
+function renderBookings(data) {
+  renderTable('bookings-table', data, [
+    {key:'booking_id', label:'ID'},
+    {key:'passenger_name', label:'Passenger'},
+    {key:'flight_number', label:'Flight'},
+    {key:'from_city', label:'From'},
+    {key:'to_city', label:'To'},
+    {key:'booking_date', label:'Date'},
+    {key:'base_fare', label:'Base Fare', format:r=>`₹${Number(r.base_fare).toLocaleString()}`},
+    {key:'total_fare', label:'Total Fare', format:r=>`₹${Number(r.total_fare).toLocaleString()}`},
+    {key:'flight_status', label:'Status', status:true},
+  ]);
+}
+
+async function loadPassengerView() {
+  const data = await api('/api/passenger-view');
+  renderTable('pax-view-table', data, [
+    {key:'passenger_name', label:'Name'},
+    {key:'total_bookings', label:'Bookings'},
+    {key:'total_spent', label:'Total Spent', format:r=>`₹${Number(r.total_spent||0).toLocaleString()}`},
+    {key:'flights_booked', label:'Flights'},
+  ]);
+}
+
+function applySearch() {
+  const q = document.getElementById('bk-search').value;
+  renderBookings(filterTable(q, allBookings, ['passenger_name','flight_number','from_city','to_city']));
+}
+
+async function addPassenger() {
+  const body = {
+    passenger_name: document.getElementById('pax-name').value,
+    contact_no: document.getElementById('pax-contact').value,
+  };
+  if (!body.passenger_name || !body.contact_no) { toast('Fill all fields', 'warn'); return; }
+  const res = await api('/api/passengers', 'POST', body);
+  if (res.success) { toast('Passenger added'); closeModal('add-pax-modal'); loadAll(); }
+  else toast(res.error, 'error');
+}
+
+async function addBooking() {
+  const body = {
+    passenger_id: document.getElementById('bk-pax').value,
+    flight_id: document.getElementById('bk-flight').value,
+    base_fare: document.getElementById('bk-base').value,
+    total_fare: document.getElementById('bk-total').value,
+    booking_date: document.getElementById('bk-date').value,
+  };
+  if (!body.passenger_id || !body.flight_id || !body.base_fare) { toast('Fill all fields', 'warn'); return; }
+  if (Number(body.total_fare) < Number(body.base_fare)) { toast('Total fare must be >= base fare (CONSTRAINT)', 'error'); return; }
+  const res = await api('/api/bookings', 'POST', body);
+  if (res.success) { toast('Booking confirmed'); closeModal('add-booking-modal'); loadAll(); }
+  else toast(res.error, 'error');
+}
+
+async function init() {
+  const [flights, passengers] = await Promise.all([api('/api/flights'), api('/api/passengers')]);
+  const flSel = document.getElementById('bk-flight');
+  flSel.innerHTML = '<option value="">Select Flight</option>';
+  flights.forEach(f => { flSel.innerHTML += `<option value="${f.flight_id}">${f.flight_number} — ${f.source_city} → ${f.dest_city}</option>`; });
+  const pSel = document.getElementById('bk-pax');
+  pSel.innerHTML = '<option value="">Select Passenger</option>';
+  passengers.forEach(p => { pSel.innerHTML += `<option value="${p.passenger_id}">${p.passenger_name}</option>`; });
+  document.getElementById('bk-date').value = new Date().toISOString().split('T')[0];
+  loadAll();
+  loadPassengerView();
+}
+init();
+</script>
+</body>
+</html>

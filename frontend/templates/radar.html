@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Live Radar — FDMS</title>
+<link rel="stylesheet" href="/static/css/main.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+</head>
+<body>
+<nav class="sidebar">
+  <div class="sidebar-logo"><span class="logo-icon">✈</span><span class="logo-text">FDMS</span></div>
+  <ul class="nav-links">
+    <li><a href="/"><span class="icon">⬛</span>Dashboard</a></li>
+    <li><a href="/flights"><span class="icon">🛫</span>Flights</a></li>
+    <li><a href="/disruptions"><span class="icon">⚡</span>Disruptions</a></li>
+    <li><a href="/crew"><span class="icon">👤</span>Crew & Pilots</a></li>
+    <li><a href="/bookings"><span class="icon">🎫</span>Bookings</a></li>
+    <li><a href="/fare"><span class="icon">💹</span>Fare & Surge</a></li>
+    <li><a href="/radar" class="active"><span class="icon">📡</span>Live Radar</a></li>
+    <li><a href="/normalization"><span class="icon">🔣</span>Normalization</a></li>
+    <li><a href="/concurrency"><span class="icon">🔒</span>Concurrency</a></li>
+    <li><a href="/analytics"><span class="icon">📊</span>Analytics</a></li>
+  </ul>
+  <div class="sidebar-footer">Flight Disruption DB</div>
+</nav>
+
+<main class="content">
+  <header class="page-header">
+    <h1>📡 Live Radar — flight_radar</h1>
+    <div style="display:flex;align-items:center;gap:12px">
+      <span id="last-updated" style="font-family:var(--mono);font-size:11px;color:var(--muted)"></span>
+      <button class="btn btn-secondary btn-sm" onclick="loadRadar()">↺ Refresh</button>
+    </div>
+  </header>
+
+  <!-- RADAR VISUAL MAP (SVG grid) -->
+  <div class="section-card" style="margin-bottom:24px">
+    <div class="section-title">🗺 Positional Overview</div>
+    <canvas id="radar-canvas" width="900" height="340" style="width:100%;border-radius:8px;background:#060810;border:1px solid var(--border)"></canvas>
+  </div>
+
+  <!-- RADAR CARDS -->
+  <div class="section-card">
+    <div class="section-title">📡 Active Radar Pings</div>
+    <div class="code-block" style="font-size:10px;margin-bottom:14px">SELECT fr.*, f.flight_number, al.airline_name, src.city, dst.city
+FROM flight_radar fr
+JOIN flight f ON fr.flight_id = f.flight_id
+JOIN airline al ON f.airline_id = al.airline_id
+JOIN airport src ON f.source_airport_id = src.airport_id
+JOIN airport dst ON f.destination_airport_id = dst.airport_id;</div>
+    <div id="radar-grid" class="radar-grid"></div>
+  </div>
+</main>
+
+<script src="/static/js/main.js"></script>
+<script>
+let radarData = [];
+
+async function loadRadar() {
+  radarData = await api('/api/radar');
+  document.getElementById('last-updated').textContent = 'Updated: ' + new Date().toLocaleTimeString('en-IN');
+  renderCards();
+  drawCanvas();
+}
+
+function renderCards() {
+  const grid = document.getElementById('radar-grid');
+  if (!radarData.length) { grid.innerHTML = '<div class="empty">No active radar data</div>'; return; }
+  grid.innerHTML = radarData.map(r => `
+    <div class="radar-card">
+      <div class="flight-num">✈ ${r.flight_number}</div>
+      <div class="radar-stat"><span class="key">Airline</span><span class="val">${r.airline_name}</span></div>
+      <div class="radar-stat"><span class="key">Route</span><span class="val">${r.from_city} → ${r.to_city}</span></div>
+      <div class="radar-stat"><span class="key">Status</span><span class="val"><span class="status-tag ${(r.flight_status||'').toLowerCase()}">${r.flight_status}</span></span></div>
+      <div class="radar-stat"><span class="key">Latitude</span><span class="val">${r.latitude}°</span></div>
+      <div class="radar-stat"><span class="key">Longitude</span><span class="val">${r.longitude}°</span></div>
+      <div class="radar-stat"><span class="key">Altitude</span><span class="val">${Number(r.altitude).toLocaleString()} ft</span></div>
+      <div class="radar-stat"><span class="key">Speed</span><span class="val">${r.speed} km/h</span></div>
+    </div>`).join('');
+}
+
+function drawCanvas() {
+  const canvas = document.getElementById('radar-canvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+
+  // Background
+  ctx.fillStyle = '#060810';
+  ctx.fillRect(0,0,W,H);
+
+  // Grid lines
+  ctx.strokeStyle = '#1a1e2e'; ctx.lineWidth = 1;
+  for (let x=0; x<W; x+=60) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y=0; y<H; y+=60) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  // Concentric circles (radar sweep look)
+  ctx.strokeStyle = '#0d1117'; ctx.lineWidth = 1;
+  [100,200,300].forEach(r => {
+    ctx.beginPath(); ctx.arc(W/2, H/2, r, 0, Math.PI*2); ctx.stroke();
+  });
+
+  // India bounding box approx: lat 8-36, lon 68-97
+  function latLonToXY(lat, lon) {
+    const x = ((lon - 68) / (97 - 68)) * (W - 80) + 40;
+    const y = H - (((lat - 8) / (36 - 8)) * (H - 80) + 40);
+    return [x, y];
+  }
+
+  // Draw airport dots (reference)
+  const airports = [
+    {name:'DEL', lat:28.56, lon:77.10},
+    {name:'BOM', lat:19.09, lon:72.87},
+    {name:'BLR', lat:13.20, lon:77.71},
+    {name:'MAA', lat:12.99, lon:80.17},
+    {name:'HYD', lat:17.23, lon:78.43},
+    {name:'CCU', lat:22.65, lon:88.45},
+  ];
+  airports.forEach(a => {
+    const [x,y] = latLonToXY(a.lat, a.lon);
+    ctx.fillStyle = '#252b3d';
+    ctx.beginPath(); ctx.arc(x,y,5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#6b7280';
+    ctx.font = '10px Space Mono'; ctx.fillText(a.name, x+7, y+4);
+  });
+
+  if (!radarData.length) return;
+
+  radarData.forEach((r, i) => {
+    if (!r.latitude || !r.longitude) return;
+    const [x, y] = latLonToXY(parseFloat(r.latitude), parseFloat(r.longitude));
+    const colors = ['#00d4ff','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4'];
+    const col = colors[i % colors.length];
+
+    // Pulse ring
+    ctx.strokeStyle = col + '44'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x,y,18,0,Math.PI*2); ctx.stroke();
+
+    // Dot
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(x,y,6,0,Math.PI*2); ctx.fill();
+
+    // Label
+    ctx.fillStyle = col;
+    ctx.font = 'bold 11px Space Mono';
+    ctx.fillText(r.flight_number, x+10, y-6);
+
+    // Speed vector (direction indicator)
+    if (r.speed > 0) {
+      ctx.strokeStyle = col + '88'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+20, y-10); ctx.stroke();
+    }
+  });
+}
+
+// Auto-refresh every 30s
+loadRadar();
+setInterval(loadRadar, 30000);
+</script>
+</body>
+</html>

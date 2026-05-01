@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Disruptions — FDMS</title>
+<link rel="stylesheet" href="/static/css/main.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+</head>
+<body>
+<nav class="sidebar">
+  <div class="sidebar-logo"><span class="logo-icon">✈</span><span class="logo-text">FDMS</span></div>
+  <ul class="nav-links">
+    <li><a href="/"><span class="icon">⬛</span>Dashboard</a></li>
+    <li><a href="/flights"><span class="icon">🛫</span>Flights</a></li>
+    <li><a href="/disruptions" class="active"><span class="icon">⚡</span>Disruptions</a></li>
+    <li><a href="/crew"><span class="icon">👤</span>Crew & Pilots</a></li>
+    <li><a href="/bookings"><span class="icon">🎫</span>Bookings</a></li>
+    <li><a href="/fare"><span class="icon">💹</span>Fare & Surge</a></li>
+    <li><a href="/radar"><span class="icon">📡</span>Live Radar</a></li>
+    <li><a href="/normalization"><span class="icon">🔣</span>Normalization</a></li>
+    <li><a href="/concurrency"><span class="icon">🔒</span>Concurrency</a></li>
+    <li><a href="/analytics"><span class="icon">📊</span>Analytics</a></li>
+  </ul>
+  <div class="sidebar-footer">Flight Disruption DB</div>
+</nav>
+
+<main class="content">
+  <header class="page-header">
+    <h1>⚡ Disruption Management</h1>
+    <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">Triggers · DML · JOIN · Subqueries</span>
+  </header>
+
+  <!-- TRIGGER INFO BOX -->
+  <div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.25);border-radius:8px;padding:14px 18px;margin-bottom:20px">
+    <div style="font-size:12px;font-weight:700;color:var(--red);margin-bottom:6px">⚡ Active Database Triggers</div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.8">
+      <code>trg_flight_status_on_disruption</code> — Auto-delays flight on High/Critical disruption<br/>
+      <code>trg_log_surge_on_disruption</code> — Auto-inserts price surge when disruption is filed
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="toolbar">
+      <input class="search-box" id="dis-search" placeholder="Search flight, type, city..." oninput="applySearch()"/>
+      <div style="display:flex;gap:8px">
+        <select id="status-filter" onchange="applySearch()" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;color:var(--text);font-family:var(--sans)">
+          <option value="">All Status</option>
+          <option value="Active">Active</option>
+          <option value="Monitoring">Monitoring</option>
+          <option value="Resolved">Resolved</option>
+        </select>
+        <button class="btn btn-danger" onclick="openModal('add-dis-modal')">+ File Disruption</button>
+      </div>
+    </div>
+    <div id="disruptions-table"></div>
+  </div>
+
+  <!-- MANAGEMENT DECISIONS -->
+  <div class="section-card">
+    <div class="section-title">📋 Management Decisions
+      <button class="btn btn-sm btn-primary" onclick="openModal('add-dec-modal')" style="margin-left:auto">+ Add Decision</button>
+    </div>
+    <div class="code-block">SELECT md.*, de.disruption_type, f.flight_number
+FROM management_decision md
+JOIN disruption_event de ON md.disruption_id = de.disruption_id
+JOIN flight f ON de.flight_id = f.flight_id;</div>
+    <div id="decisions-table"></div>
+  </div>
+</main>
+
+<!-- ADD DISRUPTION MODAL -->
+<div class="modal-overlay" id="add-dis-modal" onclick="closeOnOverlay(event)">
+  <div class="modal">
+    <h2>⚡ File Disruption Event</h2>
+    <div class="code-block" style="margin-bottom:16px;font-size:11px">-- TRIGGERS FIRE ON INSERT:
+-- trg_flight_status_on_disruption
+-- trg_log_surge_on_disruption</div>
+    <div class="form-grid">
+      <div class="form-group"><label>Flight</label><select id="d-flight"></select></div>
+      <div class="form-group"><label>Disruption Type</label>
+        <select id="d-type">
+          <option>Weather</option><option>Technical</option><option>Crew</option>
+          <option>ATC</option><option>Security</option><option>Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Severity Level</label>
+        <select id="d-severity">
+          <option>Low</option><option>Medium</option><option>High</option><option>Critical</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Status</label>
+        <select id="d-status"><option>Active</option><option>Monitoring</option><option>Resolved</option></select>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal('add-dis-modal')">Cancel</button>
+      <button class="btn btn-danger" onclick="addDisruption()">File Disruption</button>
+    </div>
+  </div>
+</div>
+
+<!-- RESOLVE MODAL -->
+<div class="modal-overlay" id="resolve-modal" onclick="closeOnOverlay(event)">
+  <div class="modal">
+    <h2>Update Disruption Status</h2>
+    <input type="hidden" id="res-did"/>
+    <div class="form-group">
+      <label>Resolution Status</label>
+      <select id="res-status"><option>Active</option><option>Monitoring</option><option>Resolved</option></select>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal('resolve-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="resolveDisruption()">Update</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD DECISION MODAL -->
+<div class="modal-overlay" id="add-dec-modal" onclick="closeOnOverlay(event)">
+  <div class="modal">
+    <h2>📋 Add Management Decision</h2>
+    <div class="form-grid">
+      <div class="form-group full"><label>Disruption Event</label><select id="dec-dis"></select></div>
+      <div class="form-group full"><label>Decision Taken</label>
+        <textarea id="dec-text" placeholder="Describe the decision taken..."></textarea>
+      </div>
+      <div class="form-group"><label>Approved By</label><input id="dec-by" placeholder="Name / Role"/></div>
+      <div class="form-group"><label>Decision Time</label><input id="dec-time" type="datetime-local"/></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal('add-dec-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="addDecision()">Save Decision</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/main.js"></script>
+<script>
+let allDisruptions = [];
+let allDecisions = [];
+
+async function loadAll() {
+  [allDisruptions, allDecisions] = await Promise.all([
+    api('/api/disruptions'), api('/api/decisions')
+  ]);
+  renderDis(allDisruptions);
+  renderDecisions(allDecisions);
+}
+
+function renderDis(data) {
+  renderTable('disruptions-table', data, [
+    {key:'flight_number', label:'Flight'},
+    {key:'airline_name', label:'Airline'},
+    {key:'from_city', label:'From'},
+    {key:'to_city', label:'To'},
+    {key:'disruption_type', label:'Type'},
+    {key:'severity_level', label:'Severity', badge:true},
+    {key:'reported_time', label:'Reported', format:r=>fmtDt(r.reported_time)},
+    {key:'resolution_status', label:'Status', status:true},
+  ], [
+    {label:'Update', fn:'openResolve', idKey:'disruption_id', cls:'btn-amber'},
+  ]);
+}
+
+function renderDecisions(data) {
+  renderTable('decisions-table', data, [
+    {key:'flight_number', label:'Flight'},
+    {key:'disruption_type', label:'Disruption Type'},
+    {key:'severity_level', label:'Severity', badge:true},
+    {key:'decision_taken', label:'Decision'},
+    {key:'approved_by', label:'Approved By'},
+    {key:'decision_time', label:'Time', format:r=>fmtDt(r.decision_time)},
+  ]);
+}
+
+function applySearch() {
+  const q = document.getElementById('dis-search').value;
+  const st = document.getElementById('status-filter').value;
+  let data = allDisruptions;
+  if (st) data = data.filter(d=>d.resolution_status===st);
+  if (q) data = filterTable(q, data, ['flight_number','disruption_type','from_city','to_city','airline_name']);
+  renderDis(data);
+}
+
+function openResolve(did) {
+  document.getElementById('res-did').value = did;
+  openModal('resolve-modal');
+}
+
+async function resolveDisruption() {
+  const did = document.getElementById('res-did').value;
+  const status = document.getElementById('res-status').value;
+  const res = await api(`/api/disruptions/${did}`, 'PUT', {resolution_status: status});
+  if (res.success) { toast('Disruption updated'); closeModal('resolve-modal'); loadAll(); }
+}
+
+async function addDisruption() {
+  const body = {
+    flight_id: document.getElementById('d-flight').value,
+    disruption_type: document.getElementById('d-type').value,
+    severity_level: document.getElementById('d-severity').value,
+    resolution_status: document.getElementById('d-status').value,
+  };
+  if (!body.flight_id) { toast('Select a flight', 'warn'); return; }
+  const res = await api('/api/disruptions', 'POST', body);
+  if (res.success) {
+    toast('Disruption filed — triggers fired (surge + status update)');
+    closeModal('add-dis-modal');
+    loadAll();
+  } else toast(res.error, 'error');
+}
+
+async function addDecision() {
+  const body = {
+    disruption_id: document.getElementById('dec-dis').value,
+    decision_taken: document.getElementById('dec-text').value,
+    approved_by: document.getElementById('dec-by').value,
+    decision_time: document.getElementById('dec-time').value,
+  };
+  if (!body.disruption_id || !body.decision_taken || !body.approved_by) { toast('Fill all fields', 'warn'); return; }
+  const res = await api('/api/decisions', 'POST', body);
+  if (res.success) { toast('Decision recorded'); closeModal('add-dec-modal'); loadAll(); }
+}
+
+async function init() {
+  const [flights, disruptions] = await Promise.all([api('/api/flights'), api('/api/disruptions')]);
+  const flSel = document.getElementById('d-flight');
+  flSel.innerHTML = '<option value="">Select Flight</option>';
+  flights.forEach(f => { flSel.innerHTML += `<option value="${f.flight_id}">${f.flight_number} — ${f.source_city} → ${f.dest_city}</option>`; });
+
+  const disSel = document.getElementById('dec-dis');
+  disSel.innerHTML = '<option value="">Select Disruption</option>';
+  disruptions.forEach(d => { disSel.innerHTML += `<option value="${d.disruption_id}">${d.flight_number} — ${d.disruption_type} (${d.severity_level})</option>`; });
+
+  loadAll();
+}
+init();
+</script>
+</body>
+</html>

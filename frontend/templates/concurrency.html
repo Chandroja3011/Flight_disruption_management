@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Concurrency — FDMS</title>
+<link rel="stylesheet" href="/static/css/main.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+</head>
+<body>
+<nav class="sidebar">
+  <div class="sidebar-logo"><span class="logo-icon">✈</span><span class="logo-text">FDMS</span></div>
+  <ul class="nav-links">
+    <li><a href="/"><span class="icon">⬛</span>Dashboard</a></li>
+    <li><a href="/flights"><span class="icon">🛫</span>Flights</a></li>
+    <li><a href="/disruptions"><span class="icon">⚡</span>Disruptions</a></li>
+    <li><a href="/crew"><span class="icon">👤</span>Crew & Pilots</a></li>
+    <li><a href="/bookings"><span class="icon">🎫</span>Bookings</a></li>
+    <li><a href="/fare"><span class="icon">💹</span>Fare & Surge</a></li>
+    <li><a href="/radar"><span class="icon">📡</span>Live Radar</a></li>
+    <li><a href="/normalization"><span class="icon">🔣</span>Normalization</a></li>
+    <li><a href="/concurrency" class="active"><span class="icon">🔒</span>Concurrency</a></li>
+    <li><a href="/analytics"><span class="icon">📊</span>Analytics</a></li>
+  </ul>
+  <div class="sidebar-footer">Flight Disruption DB</div>
+</nav>
+
+<main class="content">
+  <header class="page-header">
+    <h1>🔒 Concurrency Control & Recovery</h1>
+    <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">ACID · Isolation Levels · Savepoints · Write-Ahead Log</span>
+  </header>
+
+  <!-- ACID SUMMARY -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px">
+    <div class="stat-card blue" style="padding:16px">
+      <div class="stat-label">Atomicity</div>
+      <div style="font-size:13px;margin-top:8px;color:var(--text)">All-or-nothing. Either all ops in a transaction commit, or all are rolled back.</div>
+    </div>
+    <div class="stat-card green" style="padding:16px">
+      <div class="stat-label">Consistency</div>
+      <div style="font-size:13px;margin-top:8px;color:var(--text)">Each transaction takes DB from one valid state to another, obeying all constraints.</div>
+    </div>
+    <div class="stat-card amber" style="padding:16px">
+      <div class="stat-label">Isolation</div>
+      <div style="font-size:13px;margin-top:8px;color:var(--text)">Concurrent transactions don't see each other's intermediate states.</div>
+    </div>
+    <div class="stat-card purple" style="padding:16px">
+      <div class="stat-label">Durability</div>
+      <div style="font-size:13px;margin-top:8px;color:var(--text)">Committed transactions persist even through system crash (WAL / redo log).</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
+
+    <!-- TRANSACTION TRANSFER DEMO -->
+    <div class="section-card">
+      <div class="section-title">💳 SERIALIZABLE Transaction Demo</div>
+      <div class="code-block" style="font-size:10px;margin-bottom:12px">SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+BEGIN;
+SELECT total_fare FROM booking WHERE booking_id=? FOR UPDATE;
+UPDATE booking SET total_fare = total_fare - amount WHERE booking_id=?;
+UPDATE booking SET total_fare = total_fare + amount WHERE booking_id=?;
+COMMIT;</div>
+      <div class="form-grid" style="margin-bottom:12px">
+        <div class="form-group"><label>From Booking ID</label><input id="tx-from" type="number" placeholder="e.g. 1"/></div>
+        <div class="form-group"><label>To Booking ID</label><input id="tx-to" type="number" placeholder="e.g. 2"/></div>
+        <div class="form-group full"><label>Amount (₹)</label><input id="tx-amt" type="number" placeholder="e.g. 500"/></div>
+      </div>
+      <button class="btn btn-primary" onclick="runTransfer()">▶ Execute SERIALIZABLE Transaction</button>
+      <div id="tx-log" class="log-panel" style="margin-top:14px"></div>
+    </div>
+
+    <!-- SAVEPOINT DEMO -->
+    <div class="section-card">
+      <div class="section-title">💾 SAVEPOINT Demo</div>
+      <div class="code-block" style="font-size:10px;margin-bottom:12px">BEGIN;
+UPDATE flight SET flight_status=? WHERE flight_id=?;
+SAVEPOINT sp1;
+UPDATE flight SET flight_status=? WHERE flight_id=?;
+-- Option A: ROLLBACK TO SAVEPOINT sp1  (partial undo)
+-- Option B: COMMIT  (both updates)</div>
+      <div class="form-grid" style="margin-bottom:12px">
+        <div class="form-group"><label>Flight 1 ID</label><input id="sp-f1" type="number" placeholder="e.g. 1"/></div>
+        <div class="form-group"><label>Flight 1 Status</label>
+          <select id="sp-s1"><option>Delayed</option><option>Cancelled</option><option>Departed</option><option>Landed</option><option>Scheduled</option></select>
+        </div>
+        <div class="form-group"><label>Flight 2 ID</label><input id="sp-f2" type="number" placeholder="e.g. 2"/></div>
+        <div class="form-group"><label>Flight 2 Status</label>
+          <select id="sp-s2"><option>Cancelled</option><option>Delayed</option><option>Departed</option><option>Landed</option><option>Scheduled</option></select>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="runSavepoint(false)">▶ Commit Both</button>
+        <button class="btn btn-amber" onclick="runSavepoint(true)">↩ Rollback to SP1</button>
+      </div>
+      <div id="sp-log" class="log-panel" style="margin-top:14px"></div>
+    </div>
+  </div>
+
+  <!-- RECOVERY / WAL DEMO -->
+  <div class="section-card" style="margin-bottom:24px">
+    <div class="section-title">🔄 Recovery Simulation — Write-Ahead Log (WAL)</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div>
+        <div class="code-block" style="font-size:10px;margin-bottom:12px">-- WAL Concept:
+-- 1. Log BEFORE state to undo-log
+-- 2. Apply change (dirty write)
+-- 3A. COMMIT → flush redo log → durable
+-- 3B. CRASH → ROLLBACK → restore from undo-log</div>
+        <div class="form-grid" style="margin-bottom:12px">
+          <div class="form-group"><label>Flight ID to Update</label><input id="wal-fid" type="number" placeholder="e.g. 3"/></div>
+          <div class="form-group"><label>New Status</label>
+            <select id="wal-status"><option>Delayed</option><option>Cancelled</option><option>Departed</option><option>Landed</option><option>Scheduled</option></select>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" onclick="runRecovery(false)">▶ Commit Transaction</button>
+          <button class="btn btn-danger" onclick="runRecovery(true)">💥 Simulate Crash</button>
+        </div>
+      </div>
+      <div>
+        <div id="wal-log" class="log-panel"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ISOLATION LEVELS EXPLAINER -->
+  <div class="section-card">
+    <div class="section-title">📋 Isolation Levels Reference</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Level</th>
+            <th>Dirty Read</th>
+            <th>Non-Repeatable Read</th>
+            <th>Phantom Read</th>
+            <th>Use in FDMS</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>READ UNCOMMITTED</code></td><td style="color:var(--red)">Possible</td><td style="color:var(--red)">Possible</td><td style="color:var(--red)">Possible</td><td style="color:var(--muted)">Not used</td></tr>
+          <tr><td><code>READ COMMITTED</code></td><td style="color:var(--green)">Prevented</td><td style="color:var(--red)">Possible</td><td style="color:var(--red)">Possible</td><td style="color:var(--muted)">Default</td></tr>
+          <tr><td><code>REPEATABLE READ</code></td><td style="color:var(--green)">Prevented</td><td style="color:var(--green)">Prevented</td><td style="color:var(--red)">Possible</td><td style="color:var(--muted)">MySQL default</td></tr>
+          <tr><td><code>SERIALIZABLE</code></td><td style="color:var(--green)">Prevented</td><td style="color:var(--green)">Prevented</td><td style="color:var(--green)">Prevented</td><td style="color:var(--accent)">Fare transfers</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script src="/static/js/main.js"></script>
+<script>
+function logLine(panelId, msg, type='info') {
+  const p = document.getElementById(panelId);
+  const line = document.createElement('div');
+  line.className = `log-entry ${type}`;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  p.appendChild(line);
+  p.scrollTop = p.scrollHeight;
+}
+
+function clearLog(id) { document.getElementById(id).innerHTML = ''; }
+
+async function runTransfer() {
+  clearLog('tx-log');
+  const body = {
+    from_booking_id: document.getElementById('tx-from').value,
+    to_booking_id: document.getElementById('tx-to').value,
+    amount: document.getElementById('tx-amt').value,
+  };
+  if (!body.from_booking_id || !body.to_booking_id || !body.amount) {
+    logLine('tx-log', 'ERROR: Fill all fields', 'error'); return;
+  }
+  logLine('tx-log', 'SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
+  logLine('tx-log', `BEGIN — transferring ₹${body.amount} from booking #${body.from_booking_id} to #${body.to_booking_id}`);
+  logLine('tx-log', 'SELECT ... FOR UPDATE (acquiring lock)');
+
+  const res = await api('/api/concurrency/transfer', 'POST', body);
+  if (res.success) {
+    logLine('tx-log', 'COMMIT — locks released', 'info');
+    logLine('tx-log', `✓ ${res.message}`, 'info');
+    toast('Transaction committed (SERIALIZABLE)');
+  } else {
+    logLine('tx-log', `ROLLBACK — ${res.error}`, 'error');
+    logLine('tx-log', `✗ ${res.message}`, 'error');
+    toast(res.error, 'error');
+  }
+}
+
+async function runSavepoint(rollback) {
+  clearLog('sp-log');
+  const body = {
+    flight_id1: document.getElementById('sp-f1').value,
+    status1: document.getElementById('sp-s1').value,
+    flight_id2: document.getElementById('sp-f2').value,
+    status2: document.getElementById('sp-s2').value,
+    rollback_to_savepoint: rollback,
+  };
+  if (!body.flight_id1 || !body.flight_id2) { logLine('sp-log', 'Fill both flight IDs', 'error'); return; }
+
+  logLine('sp-log', 'BEGIN');
+  logLine('sp-log', `UPDATE flight SET status='${body.status1}' WHERE flight_id=${body.flight_id1}`);
+  logLine('sp-log', 'SAVEPOINT sp1 — checkpoint created');
+  logLine('sp-log', `UPDATE flight SET status='${body.status2}' WHERE flight_id=${body.flight_id2}`);
+
+  const res = await api('/api/concurrency/savepoint', 'POST', body);
+  if (res.success) {
+    if (rollback) {
+      logLine('sp-log', 'ROLLBACK TO SAVEPOINT sp1', 'warn');
+      logLine('sp-log', `✓ ${res.message}`, 'warn');
+    } else {
+      logLine('sp-log', 'COMMIT — all changes persisted', 'info');
+      logLine('sp-log', `✓ ${res.message}`, 'info');
+    }
+    toast(res.message);
+  } else {
+    logLine('sp-log', `ROLLBACK — ${res.error}`, 'error');
+    toast(res.error, 'error');
+  }
+}
+
+async function runRecovery(crash) {
+  clearLog('wal-log');
+  const body = {
+    flight_id: document.getElementById('wal-fid').value,
+    new_status: document.getElementById('wal-status').value,
+    simulate_crash: crash,
+  };
+  if (!body.flight_id) { logLine('wal-log', 'Enter a flight ID', 'error'); return; }
+
+  logLine('wal-log', 'BEGIN');
+  logLine('wal-log', `WRITE-AHEAD LOG: recording before-image of flight #${body.flight_id}`);
+  logLine('wal-log', `UPDATE flight SET flight_status='${body.new_status}' — dirty write`);
+  if (crash) logLine('wal-log', '💥 CRASH SIMULATED — system failure!', 'error');
+
+  const res = await api('/api/recovery/simulate', 'POST', body);
+  if (res.log) {
+    res.log.forEach(entry => {
+      const type = entry.step.includes('CRASH') || entry.step.includes('ROLLBACK') ? 'error'
+                   : entry.step.includes('COMMIT') ? 'info' : 'warn';
+      logLine('wal-log', `${entry.step}${entry.recovered_to ? ' → ' + entry.recovered_to : ''}${entry.before ? ` [${entry.before} → ${entry.after}]` : ''}`, type);
+    });
+  }
+  toast(res.message || (res.success ? 'Done' : res.error), res.success ? 'success' : 'error');
+}
+</script>
+</body>
+</html>
